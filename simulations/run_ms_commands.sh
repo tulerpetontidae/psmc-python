@@ -43,7 +43,7 @@ mkdir -p ms_output
 i=1
 while read cmd; do
   output_file="ms_output/sim-$i.ms"
-  echo "$cmd" | $ms_path > $output_file
+  ${ms_path} ${cmd#ms } > ${output_file}
   i=$((i+1))
 done < "$cmd_file"
 
