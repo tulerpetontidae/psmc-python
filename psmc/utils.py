@@ -1,5 +1,6 @@
 from scipy.special import logsumexp
 import numpy as np
+import re
 
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
@@ -51,3 +52,10 @@ def maxmul(log_A, log_B):
     out1, out2 = np.max(elementwise_sum, axis=1), np.argmax(elementwise_sum, axis=1)
     
     return out1,out2
+
+def read_sim_history(s):
+    pattern = r'-eN\s+([\d.]+)\s+([\d.]+)'
+    matches = re.findall(pattern, s)
+    tuples = [[float(match[0]), float(match[1])] for match in matches]
+    tuples = [[0, tuples[0][1]]] + tuples
+    return np.array(tuples)
