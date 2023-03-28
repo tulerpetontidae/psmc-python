@@ -3,7 +3,7 @@ from numba import jit, njit
 from scipy.optimize import minimize
 from psmc.utils import maxmul
 
-import tqdm
+from tqdm import tqdm
 
 @njit
 def rand_choice_nb(arr, prob):
@@ -253,7 +253,7 @@ class PSMC:
     
     def normalize(self, a, axis=-1):
         c = np.sum(a, axis=axis)
-        b = a / c
+        b = a / c[:, None]
         
         return b, c
     
@@ -289,7 +289,7 @@ class PSMC:
         
         beta[:, -1, :]= np.ones((batch_size, self.n_steps+1))     
         for s in tqdm(range(S_max-2, -1, -1)):
-            beta[:, s, :] = np.dot(beta[:, s+1, :] * b[:,s+1,:], A.T) / c_norm[:,s+1]
+            beta[:, s, :] = np.dot(beta[:, s+1, :] * b[:,s+1,:], A.T) / c_norm[:,s+1,None]
         return beta
 
         
@@ -472,14 +472,15 @@ class PSMC:
         batch_size = x.shape[0]; 
         S_max = x.shape[1]
         
-        # Initialize loss list
+        # Initialize loss list and parameters history list
         loss_list = []
-    
+        params_history = []
         # Set initial parameter values
         self.lam = params0[2:]
         self.theta = params0[0]
         self.rho = params0[1]
-                    
+        params_history.append(params0)
+
         # Run the EM algorithm
         for i in range(n_iter):
             print('EM iteration', i)
@@ -498,8 +499,8 @@ class PSMC:
                                               S),
                                         method='Nelder-Mead', #in original paper they use Powell method
                                         bounds=bounds,
-                                        options={'maxiter':5*50,
-                                                 'maxfev':5*50,
+                                        options={'maxiter':5*100,
+                                                 'maxfev':5*100,
                                                  'fatol': 0.1})
             
             # Update learnable parameters
@@ -515,9 +516,10 @@ class PSMC:
 
             params0 = [self.theta, self.rho] + list(self.lam)  
             loss_list.append((loglike_before_m, loglike_after_m))
-            print(loglike_before_m, '-->', loglike_after_m)
+            print(loglike_before_m, '-->', loglike_after_m, '\tΔ:',  loglike_before_m - loglike_after_m)
+            params_history.append(params0)
 
-        return loss_list
+        return loss_list, params_history
     
     @staticmethod
     @jit(nopython=True)
