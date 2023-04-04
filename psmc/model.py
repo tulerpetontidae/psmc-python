@@ -26,31 +26,6 @@ def rand_choice_nb(arr, prob):
     """
     cum_prob = np.cumsum(prob)
     return arr[np.searchsorted(cum_prob, np.random.random(), side="right")]
-@njit
-def normalize(a, axis=-1):
-    """
-    Normalizes an array along a given axis by dividing each element by the sum of
-    elements along that axis.
-
-    Parameters:
-    -----------
-    a: numpy.ndarray
-        The array to normalize.
-    axis: int, optional (default=-1)
-        The axis along which to normalize `a`.
-
-    Returns:
-    --------
-    tuple (numpy.ndarray, numpy.ndarray)
-        A tuple of two numpy arrays: 
-        - The normalized array.
-        - The sum of elements in the original array along the given axis.
-
-    """
-    c = np.sum(a, axis=axis)
-    b = a / c
-    return b, c
-
 
 class PSMC:
     def __init__(self, T_max, n_steps, theta0, rho0, mu=2.5 * 1e-8):
@@ -75,6 +50,19 @@ class PSMC:
         return self.theta / (4 * self.mu)
     
     def compute_t(self, alpha=0.1):
+        """
+        Computes the time points for a PSMC model. For details look at the paper methods section.
+
+        Parameters:
+        -----------
+        alpha : float, optional
+            A scaling factor for the time intervals.
+
+        Returns:
+        --------
+        numpy.ndarray
+            An array of time points.
+        """
         beta = np.log(1 + self.T_max / alpha) / self.n_steps
         t = []
         for k in range(self.n_steps):
@@ -83,34 +71,42 @@ class PSMC:
         t.append(1e300)
         return np.array(t)
             
-    def group_time_states(self, total_train_length=1e5, min_expectation=20, merge_last=True):
-        self.param_recalculate()
-        t_count_expected = [total_train_length / self.C_sigma() * self.pi(k)  for k in range(self.n_steps)]
-        new_t = []
-        new_lam = []
-        c = 0
-        c_l = 0 
-        hold_state = 0
-        for i in range(self.n_steps-1):
-            c += t_count_expected[i]
-            if c >= min_expectation:
-                new_t.append(self.t[hold_state])
-                new_lam.append((self.lam[c_l:i+1] * (self.t[c_l+1:i+2] - self.t[c_l:i+1])).sum()  / (self.t[i+1] - self.t[c_l]))
+    def group_time_states(self, pattern):
+        """
+        Groups time intervals and states in accordance with the provided pattern.
 
-                c = 0
-                c_l = i + 1
-                hold_state = i + 1 
-                
-        if not merge_last:
-            new_t.append(self.t[i+1])
-            new_lam.append(self.lam[-1])
-        else:
-            new_lam[-1] = self.lam[-1]
-        
-        self.n_steps = len(new_t)
-        self.t = np.array(new_t)
-        self.lam= np.array(new_lam)
+        Parameters:
+        -----------
+        pattern : str, optional
+            A string containing the pattern to be used for grouping. For example '1*4+25*2+1*4+1*6'.
+
+        Returns:
+        --------
+        None
+        """
         self.param_recalculate()
+        counter = 0
+        pattern = np.array([x.split('*') for x in pattern.split('+')]).astype(int)
+        t_new = []
+        lam_new = []
+
+        for s in range(pattern.shape[0]):
+            ts, gs = pattern[s]
+            for t in range(ts):
+                t_new.append(self.t[counter + gs])
+                
+                lam_new.append((self.lam[counter:(counter+gs)] * (self.t[(counter+1):(counter+gs+1)] -
+                                                                   self.t[(counter):(counter+gs)])).sum()  / (self.t[counter + gs] - self.t[counter]))
+                counter += gs
+                
+        t_new = np.array([0.] + t_new + [1e300])
+        lam_new = np.array(lam_new + [self.lam[-1]])
+
+        self.n_steps = len(lam_new) - 1
+        self.t = np.array(t_new)
+        self.lam= np.array(lam_new)
+        self.param_recalculate()
+        
 
     # PSMC model functions 
         
@@ -310,7 +306,7 @@ class PSMC:
             xi += np.sum(alpha[:,i-1,:,None] * b[:,i,None,:] *
                          A[None,:,:] * beta[:,i,None,:] / cn[:,i,None,None], 0)
         
-        gamma = alpha * beta
+        gamma = (alpha * beta)
         
         return xi, gamma, cn
     
@@ -394,7 +390,7 @@ class PSMC:
     
     ## EM Inference and sampling
     
-    def Q_func(self, params, x, S):
+    def Q_func(self, params, x):
         """
         Calculates the Q-function for the EM algorithm.
 
@@ -404,10 +400,6 @@ class PSMC:
             An array of parameters that determine the state of the model.
         x : numpy.ndarray of shape (batch_size, S_max)
             An array of integers representing the observed data.
-        S : numpy.ndarray of shape (batch_size)
-            An array of integers representing the number of observed data points
-            in each sample.
-
         Returns:
         --------
         float
@@ -435,13 +427,12 @@ class PSMC:
         log_state_priors = np.log(self.prior_matrix())
         log_transition_matrix = np.log(self.transition_matrix())
         log_emission_matrix = np.log(self.emission_likelihood(x))
-        
+
         # Calculate Q-function value
         q = (gamma[:,0,:] * log_state_priors[:]).sum() + \
         (xi * log_transition_matrix[:,:]).sum() + \
         (log_emission_matrix * gamma).sum()
 
-        # print(q, (gamma[:,0,:] * log_state_priors[:]).sum(), (xi * log_transition_matrix[:,:]).sum(), (log_emission_matrix * gamma).sum())
         return -q
     
     def EM(self, params0, bounds, x, S, n_iter=20):
@@ -495,12 +486,11 @@ class PSMC:
             # Q-func maximization (M-step)
             optimized_params = minimize(self.Q_func,
                                         params0,
-                                        args=(x,
-                                              S),
+                                        args=(x),
                                         method='Nelder-Mead', #in original paper they use Powell method
                                         bounds=bounds,
-                                        options={'maxiter':5*100,
-                                                 'maxfev':5*100,
+                                        options={'maxiter':2*100,
+                                                 'maxfev':2*100,
                                                  'fatol': 0.1})
             
             # Update learnable parameters
