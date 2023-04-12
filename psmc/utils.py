@@ -1,6 +1,8 @@
 from scipy.special import logsumexp
 import numpy as np
 import re
+from scipy.optimize import minimize
+from tqdm.notebook import tqdm
 
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
@@ -59,3 +61,41 @@ def read_sim_history(s):
     tuples = [[float(match[0]), float(match[1])] for match in matches]
     tuples = [[0, tuples[0][1]]] + tuples
     return np.array(tuples)
+
+def tqdm_minimize(fun, x0, args=(), method=None, jac=None, hessp=None,
+                  hess=None, constraints=(), tol=None, callback=None,
+                  options=None, bounds=None):
+    """
+    A modified version of the `minimize` function from scipy.optimize that prints a tqdm-like
+    output on each iteration.
+
+    Args:
+        fun: The objective function to be minimized.
+        x0: Initial guess for the optimization parameters.
+        args: Extra arguments to be passed to the objective function.
+        method: Name of the optimization method to use.
+        jac: Function to calculate the Jacobian matrix (gradient) of the objective function.
+        hessp: Function to calculate the Hessian matrix of the objective function multiplied by a vector.
+        hess: Function to calculate the Hessian matrix of the objective function.
+        constraints: A list of constraint dictionaries or instances of LinearConstraint or NonlinearConstraint.
+        tol: Tolerance for termination.
+        callback: A function called after each iteration of the optimization.
+        options: A dictionary of solver options.
+        bounds: A sequence of (min, max) pairs for each element in x.
+
+    Returns:
+        A `OptimizeResult` object representing the optimization result.
+
+    """
+    if options is None:
+        options = {}
+
+    n_iter = options.get('maxiter', 200)
+    t = tqdm(total=n_iter)
+
+    def callback_wrapper(x):
+        t.update(1)
+
+    return minimize(fun, x0, args=args, method=method, jac=jac, hessp=hessp, hess=hess,
+                    constraints=constraints, tol=tol, callback=callback_wrapper,
+                    options=options, bounds=bounds)

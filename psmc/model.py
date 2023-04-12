@@ -1,7 +1,6 @@
 import numpy as np
 from numba import jit, njit
-from scipy.optimize import minimize
-from psmc.utils import maxmul
+from psmc.utils import maxmul, tqdm_minimize
 
 from tqdm import tqdm
 
@@ -40,7 +39,7 @@ class PSMC:
         self.t_max = t_max #learned parameter, apparently
         
         self.t = self.compute_t()
-        self.C_pi, self.C_sigma, self.p_kl, self.em, self.sigma = self.compute_params()
+        self.C_pi, self.C_sigma, self.p_kl, self.em, self.sigma, self.pi_k = self.compute_params()
 
         # store params of expectation step
         self.loglike_stored = None
@@ -127,6 +126,7 @@ class PSMC:
         q = np.zeros(n + 1) * np.nan
         e = np.zeros((2, n+1))
         p_kl = np.zeros((n+1, n+1))
+        pi_k = np.zeros(n+1)
 
         # Calculate theta
         for k in range(n+1):
@@ -167,6 +167,7 @@ class PSMC:
             # Calculate pi_k, sigma_k
             cpik = ak1 * (sum_t + lak) - alpha[k+1] * tau[k]
             pik = cpik / C_pi
+            pi_k[k] = pik
             sigma[k] = (ak1 / (C_pi * rho) + pik / 2.0) / C_sigma
 
             # Calculate avg_t, the average time point where mutation happens
@@ -200,7 +201,7 @@ class PSMC:
 
             sum_t += tau[k]
 
-        return C_pi, C_sigma, p_kl, e, sigma
+        return C_pi, C_sigma, p_kl, e, sigma, pi_k
     
     def param_recalculate(self):
         """
@@ -217,7 +218,7 @@ class PSMC:
             - sigma: prior probabilities for each state
 
         """
-        self.C_pi, self.C_sigma, self.p_kl, self.em, self.sigma = self.compute_params()
+        self.C_pi, self.C_sigma, self.p_kl, self.em, self.sigma, self.pi_k = self.compute_params()
     
     ## General HMM functionality
     
@@ -257,7 +258,7 @@ class PSMC:
         
         alpha[:, 0, :], c_norm[:,0] = self.normalize(np.multiply(b[:,0,:], pi[None,:]), axis=-1)
         
-        for s in tqdm(range(1, S_max)):
+        for s in range(1, S_max):
             alpha[:, s, :], c_norm[:,s] = self.normalize(np.multiply(b[:,s,:],
                                                                      np.dot(alpha[:, s-1, :], A)), axis=-1)
         return alpha, c_norm
@@ -274,7 +275,7 @@ class PSMC:
         beta = np.zeros((batch_size, S_max, self.n_steps+1))
         
         beta[:, -1, :]= np.ones((batch_size, self.n_steps+1))     
-        for s in tqdm(range(S_max-2, -1, -1)):
+        for s in range(S_max-2, -1, -1):
             beta[:, s, :] = np.dot(beta[:, s+1, :] * b[:,s+1,:], A.T) / c_norm[:,s+1,None]
         return beta
 
@@ -292,7 +293,7 @@ class PSMC:
         b = self.emission_likelihood(x)
         
         xi = np.zeros((self.n_steps+1, self.n_steps+1))
-        for i in tqdm(range(1, S_max)): # To reduce memmory usage
+        for i in range(1, S_max): # To reduce memmory usage
             xi += np.sum(alpha[:,i-1,:,None] * b[:,i,None,:] *
                          A[None,:,:] * beta[:,i,None,:] / cn[:,i,None,None], 0)
         
@@ -476,14 +477,14 @@ class PSMC:
             loglike_before_m = np.log(cn).sum()
             
             # Q-func maximization (M-step)
-            optimized_params = minimize(self.Q_func,
-                                        params0,
-                                        args=(x),
-                                        method='Nelder-Mead', #in original paper they use Powell method
-                                        bounds=bounds,
-                                        options={'maxiter':3*100,
-                                                 'maxfev':3*100,
-                                                 'fatol': 0.1})
+            optimized_params = tqdm_minimize(self.Q_func,
+                                            params0,
+                                            args=(x,),
+                                            method='Nelder-Mead', #in original paper they use Powell method
+                                            bounds=bounds,
+                                            options={'maxiter':3*100,
+                                                    'maxfev':3*100,
+                                                    'fatol': 0.1})
             
             # Update learnable parameters
             self.lam = optimized_params['x'][3:]
