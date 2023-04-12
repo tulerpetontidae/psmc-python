@@ -28,14 +28,16 @@ def rand_choice_nb(arr, prob):
     return arr[np.searchsorted(cum_prob, np.random.random(), side="right")]
 
 class PSMC:
-    def __init__(self, T_max, n_steps, theta0, rho0, mu=2.5 * 1e-8):
-        self.T_max = T_max
+    def __init__(self, t_max, n_steps, theta0, rho0, mu=2.5 * 1e-8, pattern=None):
+        
         self.n_steps = n_steps
         self.mu = mu
+        self.pattern=pattern
 
         self.theta = theta0 #learned parameter
         self.rho = rho0 #learned parameter
-        self.lam = np.ones(n_steps + 1) #learned parameter
+        self.lam = np.ones(self.n_free_params) #learned parameter
+        self.t_max = t_max #learned parameter, apparently
         
         self.t = self.compute_t()
         self.C_pi, self.C_sigma, self.p_kl, self.em, self.sigma = self.compute_params()
@@ -48,6 +50,13 @@ class PSMC:
     @property
     def N0(self):
         return self.theta / (4 * self.mu)
+    
+    @property
+    def n_free_params(self):
+        if self.pattern==None:
+            return 3 + self.n_steps
+        else:
+            return 3 + np.sum([int(x.split('*')[0]) for x in self.pattern.split('+')])
     
     def compute_t(self, alpha=0.1):
         """
@@ -63,51 +72,31 @@ class PSMC:
         numpy.ndarray
             An array of time points.
         """
-        beta = np.log(1 + self.T_max / alpha) / self.n_steps
+        beta = np.log(1 + self.t_max / alpha) / self.n_steps
         t = []
         for k in range(self.n_steps):
             t.append(alpha * (np.exp(beta * k) - 1))
-        t.append(self.T_max)
+        t.append(self.t_max)
         t.append(1e300)
         return np.array(t)
+    
+    def map_lam(self, lam_grouped):
+        pattern = self.pattern
+        if pattern != None:
+            lam = []
+            counter = 0
+            pattern = np.array([x.split('*') for x in pattern.split('+')]).astype(int)
+            for s in range(pattern.shape[0]):
+                ts, gs = pattern[s]
+                for t in range(ts):
+                    for g in range(gs):
+                        lam.append(lam_grouped[counter])
+                    counter += 1
+            lam.append(lam_grouped[-1])
+            return np.array(lam)
+        else:
+            return lam_grouped
             
-    def group_time_states(self, pattern):
-        """
-        Groups time intervals and states in accordance with the provided pattern.
-
-        Parameters:
-        -----------
-        pattern : str, optional
-            A string containing the pattern to be used for grouping. For example '1*4+25*2+1*4+1*6'.
-
-        Returns:
-        --------
-        None
-        """
-        self.param_recalculate()
-        counter = 0
-        pattern = np.array([x.split('*') for x in pattern.split('+')]).astype(int)
-        t_new = []
-        lam_new = []
-
-        for s in range(pattern.shape[0]):
-            ts, gs = pattern[s]
-            for t in range(ts):
-                t_new.append(self.t[counter + gs])
-                
-                lam_new.append((self.lam[counter:(counter+gs)] * (self.t[(counter+1):(counter+gs+1)] -
-                                                                   self.t[(counter):(counter+gs)])).sum()  / (self.t[counter + gs] - self.t[counter]))
-                counter += gs
-                
-        t_new = np.array([0.] + t_new + [1e300])
-        lam_new = np.array(lam_new + [self.lam[-1]])
-
-        self.n_steps = len(lam_new) - 1
-        self.t = np.array(t_new)
-        self.lam= np.array(lam_new)
-        self.param_recalculate()
-        
-
     # PSMC model functions 
         
     def compute_params(self):
@@ -127,7 +116,8 @@ class PSMC:
 
         """
         n, t, lam, theta, rho = self.n_steps, self.t, self.lam, self.theta, self.rho
-
+        lam = self.map_lam(lam)
+        
         # Initialize arrays
         alpha = np.zeros(n+2)
         tau = np.zeros(n+1)
@@ -409,9 +399,10 @@ class PSMC:
         # TODO : not yet implemented for multiple batches of different size
         
         # Update learnable parameters
-        self.lam = params[2:]
+        self.lam = params[3:]
         self.theta = params[0]
         self.rho = params[1]
+        self.t_max = params[2]
         
         # Recalculate psmc parameters necessery to estimate new (pi, A, b)
         self.param_recalculate()
@@ -467,9 +458,10 @@ class PSMC:
         loss_list = []
         params_history = []
         # Set initial parameter values
-        self.lam = params0[2:]
+        self.lam = params0[3:]
         self.theta = params0[0]
         self.rho = params0[1]
+        self.t_max = params0[2]
         params_history.append(params0)
 
         # Run the EM algorithm
@@ -489,14 +481,15 @@ class PSMC:
                                         args=(x),
                                         method='Nelder-Mead', #in original paper they use Powell method
                                         bounds=bounds,
-                                        options={'maxiter':2*100,
-                                                 'maxfev':2*100,
+                                        options={'maxiter':3*100,
+                                                 'maxfev':3*100,
                                                  'fatol': 0.1})
             
             # Update learnable parameters
-            self.lam = optimized_params['x'][2:]
+            self.lam = optimized_params['x'][3:]
             self.theta = optimized_params['x'][0]
             self.rho = optimized_params['x'][1]
+            self.t_max = optimized_params['x'][2]
             
             # Recalculate model parameters
             self.param_recalculate()
@@ -504,15 +497,16 @@ class PSMC:
             _, cn = self.compute_alpha(x)
             loglike_after_m = np.log(cn).sum()  
 
-            params0 = [self.theta, self.rho] + list(self.lam)  
+            params0 = [self.theta, self.rho, self.t_max] + list(self.lam)  
             loss_list.append((loglike_before_m, loglike_after_m))
             print(loglike_before_m, '-->', loglike_after_m, '\tΔ:',  loglike_before_m - loglike_after_m)
             params_history.append(params0)
 
         return loss_list, params_history
     
+    
     @staticmethod
-    @jit(nopython=True)
+    @njit
     def jit_sampling(n_iter, pi, A, b, n_states):
             z_t = rand_choice_nb(np.arange(n_states+1), pi)
 
