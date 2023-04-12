@@ -1,8 +1,9 @@
 import numpy as np
 from numba import jit, njit
-from psmc.utils import maxmul, tqdm_minimize
+from psmc.utils import maxmul
+from scipy.optimize import minimize
 
-from tqdm import tqdm
+from tqdm.notebook import tqdm
 
 @njit
 def rand_choice_nb(arr, prob):
@@ -41,6 +42,8 @@ class PSMC:
         self.t = self.compute_t()
         self.C_pi, self.C_sigma, self.p_kl, self.em, self.sigma, self.pi_k = self.compute_params()
 
+        
+        self.progress = None # for tqdm
         # store params of expectation step
         self.loglike_stored = None
         self.log_xi_stored = None
@@ -173,7 +176,7 @@ class PSMC:
             # Calculate avg_t, the average time point where mutation happens
             avg_t = - np.log(1.0 - pik / (C_sigma * sigma[k])) / rho
             if np.isnan(avg_t) or avg_t < sum_t or avg_t > sum_t + tau[k]:  # in case something bad happens
-                print("SOMETHING BAD IS HAPPENING")
+                # print("SOMETHING BAD IS HAPPENING")
                 avg_t = sum_t + (lak - tau[k] * alpha[k+1] / (alpha[k] - alpha[k+1]))
 
             # Calculate q_{kl}
@@ -212,7 +215,7 @@ class PSMC:
         tuple
             A tuple of computed parameters, including:
             - C_pi: a scalar value used in calculation of other parameters
-            - C_sigma: a scalar value used in calculation of other parameters
+            - C_sigma: a scalar value used in calculation of other parƒximeters
             - p_kl: a matrix of transition probabilities between states k and l
             - em: emission probabilities for each state
             - sigma: prior probabilities for each state
@@ -293,7 +296,7 @@ class PSMC:
         b = self.emission_likelihood(x)
         
         xi = np.zeros((self.n_steps+1, self.n_steps+1))
-        for i in range(1, S_max): # To reduce memmory usage
+        for i in tqdm(range(1, S_max), desc=r"Calculating ξ"): # To reduce memmory usage
             xi += np.sum(alpha[:,i-1,:,None] * b[:,i,None,:] *
                          A[None,:,:] * beta[:,i,None,:] / cn[:,i,None,None], 0)
         
@@ -421,9 +424,15 @@ class PSMC:
         log_emission_matrix = np.log(self.emission_likelihood(x))
 
         # Calculate Q-function value
-        q = (gamma[:,0,:] * log_state_priors[:]).sum() + \
-        (xi * log_transition_matrix[:,:]).sum() + \
-        (log_emission_matrix * gamma).sum()
+        q = 0
+        q += np.sum(gamma[:,0,:] * log_state_priors[:])
+        q += np.einsum('ij,ij->', xi, log_transition_matrix)
+        q += np.einsum('ijk,ijk->', log_emission_matrix, gamma)
+
+        # Update progress bar
+        if self.progress is not None:
+            self.progress.update(1)
+            self.progress.set_postfix({'Q': q})
 
         return -q
     
@@ -477,15 +486,16 @@ class PSMC:
             loglike_before_m = np.log(cn).sum()
             
             # Q-func maximization (M-step)
-            optimized_params = tqdm_minimize(self.Q_func,
+            self.progress = tqdm(total=5*100, desc='Q-func optimization')
+            optimized_params = minimize(self.Q_func,
                                             params0,
                                             args=(x,),
-                                            method='Nelder-Mead', #in original paper they use Powell method
+                                            method='Powell', #in original paper they use Powell method
                                             bounds=bounds,
-                                            options={'maxiter':3*100,
-                                                    'maxfev':3*100,
-                                                    'fatol': 0.1})
-            
+                                            options={'maxiter':5*100,
+                                                    'maxfev':5*100,
+                                                    'ftol': 0.1})
+            self.progress = None
             # Update learnable parameters
             self.lam = optimized_params['x'][3:]
             self.theta = optimized_params['x'][0]
