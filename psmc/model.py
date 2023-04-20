@@ -4,6 +4,9 @@ from psmc.utils import maxmul
 from scipy.optimize import minimize
 
 from tqdm.notebook import tqdm
+from IPython.display import clear_output
+
+
 
 @njit
 def rand_choice_nb(arr, prob):
@@ -43,7 +46,7 @@ class PSMC:
         self.C_pi, self.C_sigma, self.p_kl, self.em, self.sigma, self.pi_k = self.compute_params()
 
         
-        self.progress = None # for tqdm
+        self.progress = {} # for tqdm
         # store params of expectation step
         self.loglike_stored = None
         self.log_xi_stored = None
@@ -117,7 +120,9 @@ class PSMC:
             - sigma: prior probabilities for each state
 
         """
-        n, t, lam, theta, rho = self.n_steps, self.t, self.lam, self.theta, self.rho
+        self.t = self.compute_t()
+        t = self.t
+        n, lam, theta, rho = self.n_steps, self.lam, self.theta, self.rho
         lam = self.map_lam(lam)
         
         # Initialize arrays
@@ -127,7 +132,7 @@ class PSMC:
         sigma = np.zeros(n+1)
         q_aux = np.zeros(n)
         q = np.zeros(n + 1) * np.nan
-        e = np.zeros((2, n+1))
+        e = np.zeros((3, n+1))
         p_kl = np.zeros((n+1, n+1))
         pi_k = np.zeros(n+1)
 
@@ -199,8 +204,9 @@ class PSMC:
             p_kl[k,k] = tmp * q[k] + (1.0 - tmp)
 
             # Calculate e_{2,k}
-            e[0, k] = np.exp(-theta * (avg_t + 0))
-            e[1, k] = 1 - np.exp(-theta * (avg_t + 0))
+            e[0, k] = np.exp(-theta * avg_t)
+            e[1, k] = 1 - np.exp(-theta * avg_t)
+            e[2, k] = 1. # for missing data
 
             sum_t += tau[k]
 
@@ -261,9 +267,11 @@ class PSMC:
         
         alpha[:, 0, :], c_norm[:,0] = self.normalize(np.multiply(b[:,0,:], pi[None,:]), axis=-1)
         
+        self.progress['alpha'] = tqdm(total = S_max-1, desc="Calculating α", leave=True)
         for s in range(1, S_max):
             alpha[:, s, :], c_norm[:,s] = self.normalize(np.multiply(b[:,s,:],
                                                                      np.dot(alpha[:, s-1, :], A)), axis=-1)
+            self.progress['alpha'].update(1)
         return alpha, c_norm
     
     
@@ -276,10 +284,12 @@ class PSMC:
         S_max = x.shape[1]
         
         beta = np.zeros((batch_size, S_max, self.n_steps+1))
-        
-        beta[:, -1, :]= np.ones((batch_size, self.n_steps+1))     
+        beta[:, -1, :]= np.ones((batch_size, self.n_steps+1))   
+
+        self.progress['beta'] = tqdm(total = S_max-1, desc="Calculating β", leave=True)
         for s in range(S_max-2, -1, -1):
             beta[:, s, :] = np.dot(beta[:, s+1, :] * b[:,s+1,:], A.T) / c_norm[:,s+1,None]
+            self.progress['beta'].update(1)
         return beta
 
         
@@ -296,10 +306,11 @@ class PSMC:
         b = self.emission_likelihood(x)
         
         xi = np.zeros((self.n_steps+1, self.n_steps+1))
-        for i in tqdm(range(1, S_max), desc=r"Calculating ξ"): # To reduce memmory usage
+        self.progress['xi'] = tqdm(total = S_max-1, desc="Calculating ξ, γ", leave=True)
+        for i in range(1, S_max): # To reduce memmory usage
             xi += np.sum(alpha[:,i-1,:,None] * b[:,i,None,:] *
                          A[None,:,:] * beta[:,i,None,:] / cn[:,i,None,None], 0)
-        
+            self.progress['xi'].update(1)
         gamma = (alpha * beta)
         
         return xi, gamma, cn
@@ -430,9 +441,9 @@ class PSMC:
         q += np.einsum('ijk,ijk->', log_emission_matrix, gamma)
 
         # Update progress bar
-        if self.progress is not None:
-            self.progress.update(1)
-            self.progress.set_postfix({'Q': q})
+        if 'Q' in self.progress.keys():
+            self.progress['Q'].update(1)
+            self.progress['Q'].set_postfix({'Q': q})
 
         return -q
     
@@ -486,7 +497,7 @@ class PSMC:
             loglike_before_m = np.log(cn).sum()
             
             # Q-func maximization (M-step)
-            self.progress = tqdm(total=5*100, desc='Q-func optimization')
+            self.progress['Q'] = tqdm(total=5*100, desc='Q-func optimization', leave=True)
             optimized_params = minimize(self.Q_func,
                                             params0,
                                             args=(x,),
@@ -495,7 +506,7 @@ class PSMC:
                                             options={'maxiter':5*100,
                                                     'maxfev':5*100,
                                                     'ftol': 0.1})
-            self.progress = None
+            
             # Update learnable parameters
             self.lam = optimized_params['x'][3:]
             self.theta = optimized_params['x'][0]
@@ -510,9 +521,19 @@ class PSMC:
 
             params0 = [self.theta, self.rho, self.t_max] + list(self.lam)  
             loss_list.append((loglike_before_m, loglike_after_m))
-            print(loglike_before_m, '-->', loglike_after_m, '\tΔ:',  loglike_before_m - loglike_after_m)
             params_history.append(params0)
 
+            # Clean progress bar
+            for k in self.progress.keys():
+                self.progress[k].close()
+            self.progress = {}
+            clear_output(wait=True)
+
+            # Print iteration status
+            for e in range(i+1):
+                print('EM iteration', e)
+                print(loss_list[e][0], '-->', loss_list[e][1], '\tΔ:',  loss_list[e][0] - loss_list[e][1])
+        
         return loss_list, params_history
     
     

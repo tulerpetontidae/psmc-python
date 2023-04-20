@@ -61,3 +61,10 @@ def read_sim_history(s):
     tuples = [[float(match[0]), float(match[1])] for match in matches]
     tuples = [[0, tuples[0][1]]] + tuples
     return np.array(tuples)
+
+def process_genome_data(data, batch_size=300000):
+    res = len(data) % batch_size
+    data = data.replace('T', '0').replace('K', '1').replace('N', '2')
+    data = data + '2' * (batch_size - res)
+    ar = np.array(list(data)).astype(int)
+    return ar.reshape(-1, batch_size)
