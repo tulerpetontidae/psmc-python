@@ -2,6 +2,8 @@ import numpy as np
 from numba import jit, njit
 from psmc.utils import maxmul
 from scipy.optimize import minimize
+import json
+
 
 from tqdm.notebook import tqdm
 from IPython.display import clear_output
@@ -31,7 +33,7 @@ def rand_choice_nb(arr, prob):
     return arr[np.searchsorted(cum_prob, np.random.random(), side="right")]
 
 class PSMC:
-    def __init__(self, t_max, n_steps, theta0, rho0, mu=2.5 * 1e-8, pattern=None):
+    def __init__(self, t_max=15, n_steps=64, theta0=0.1, rho0=0.05, mu=2.5 * 1e-8, pattern=None):
         
         self.n_steps = n_steps
         self.mu = mu
@@ -62,6 +64,51 @@ class PSMC:
             return 3 + self.n_steps
         else:
             return 3 + np.sum([int(x.split('*')[0]) for x in self.pattern.split('+')])
+        
+    def save_params(self, filename):
+        """
+        Save model parameters to a json file.
+
+        Args:
+            filename (str): The name of the file to save the parameters in.
+
+        Returns:
+            None
+        """
+        params = {}
+        params['theta'] = self.theta
+        params['rho'] = self.rho
+        params['lam'] = list(self.lam)
+        params['t_max'] = self.t_max
+        params['n_steps'] = self.n_steps
+        params['mu'] = self.mu
+        params['pattern'] = self.pattern
+        with open(filename, 'w') as fp:
+            json.dump(params, fp)
+
+    def load_params(self, filename):
+        """
+        Load model parameters from a json file.
+
+        Args:
+            filename (str): The name of the file to load the parameters from.
+
+        Returns:
+            None
+        """
+        with open(filename, 'r') as fp:
+            params = json.load(fp)
+
+        self.theta = params['theta']
+        self.rho = params['rho']
+        self.lam = np.array(params['lam'])
+        self.t_max = params['t_max']
+        self.mu = params['mu']
+        self.pattern = params['pattern']
+
+        self.param_recalculate()
+        
+
     
     def compute_t(self, alpha=0.1):
         """
@@ -103,7 +150,6 @@ class PSMC:
             return lam_grouped
             
     # PSMC model functions 
-        
     def compute_params(self):
         """
         Computes parameters for the PSMC model. For details look at the paper methods section.
@@ -447,7 +493,7 @@ class PSMC:
 
         return -q
     
-    def EM(self, params0, bounds, x, S, n_iter=20):
+    def EM(self, params0, bounds, x, n_iter=20):
         """
         Runs the EM algorithm to estimate the parameters of the model.
 

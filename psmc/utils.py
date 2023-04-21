@@ -62,9 +62,30 @@ def read_sim_history(s):
     tuples = [[0, tuples[0][1]]] + tuples
     return np.array(tuples)
 
-def process_genome_data(data, batch_size=300000):
-    res = len(data) % batch_size
-    data = data.replace('T', '0').replace('K', '1').replace('N', '2')
-    data = data + '2' * (batch_size - res)
-    ar = np.array(list(data)).astype(int)
-    return ar.reshape(-1, batch_size)
+def process_psmcfa(psmcfa, batch_size=300000):
+    
+    with open(psmcfa, 'r') as file:
+        psmcfasta = file.read().replace('\n', '')
+    generated_seq = [re.sub(r'^\d+', '', x) for x in psmcfasta.split('>')[1:]]
+    
+    allowed_chars = set(['T', 'K', 'N'])
+
+    data = []
+    for string in generated_seq:
+        new_string = ''.join(c for c in string if c in allowed_chars)
+        data.append(new_string)
+
+    if batch_size is None:
+        for batch_id in range(len(data)):
+            data[batch_id] = list(data[batch_id].replace('T', '0').replace('K', '1').replace('N', '2'))
+        data = np.array(data).astype(int)
+
+        return data
+    else:
+        data = ''.join(data)
+        residual = len(data) % batch_size
+        data = data.replace('T', '0').replace('K', '1').replace('N', '2')
+        data = data + '2' * (batch_size - residual)
+        data = np.array(list(data)).astype(int)
+        return data.reshape(-1, batch_size)
+
