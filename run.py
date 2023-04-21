@@ -1,5 +1,4 @@
 import argparse
-import re
 import numpy as np
 from psmc.model import PSMC
 from psmc.utils import process_psmcfa
@@ -14,9 +13,11 @@ if __name__ == '__main__':
     parser.add_argument('--theta0', type=float, default=None, help='Initial value of theta parameter')
     parser.add_argument('--rho0', type=float, default=None, help='Initial value of rho parameter')
     parser.add_argument('--pattern', type=str, default=None, help='Pattern on how to group hidden states, e.g. 1*4+25*2+1*4+1*6')
+    parser.add_argument('--batch_size', type=int, default=None, help='If batching is needed what is the batch size')
+    parser.add_argument('--subset', type=int, default=None, help='Run on a subset of the data, first N sequences')
     args = parser.parse_args()
 
-    xs = process_psmcfa(args.input_file)
+    xs = process_psmcfa(args.input_file, batch_size=args.batch_size)
 
     if args.theta0 is None:
         theta0 = np.sum(xs[xs == 1]) / (xs.shape[0] * xs.shape[1])
@@ -28,9 +29,12 @@ if __name__ == '__main__':
     else:
         rho0 = args.rho0
 
-    print(f"Using theta0={theta0} and rho0={rho0}")
+    if args.subset is not None:
+        xs = xs[:args.subset]
 
-    psmc_model = PSMC(t_max=args.t_max, n_steps=args.n_steps, theta0=theta0, rho0=rho0, pattern=args.pattern)
+    print(f"Using theta0={np.round(theta0, 4)} and rho0={np.round(rho0, 4)}")
+
+    psmc_model = PSMC(t_max=args.t_max, n_steps=args.n_steps, theta0=theta0, rho0=rho0, pattern=args.pattern, progress_bar='terminal')
     psmc_model.param_recalculate()
 
     initial_params = [theta0, rho0, args.t_max] + [1.] * (psmc_model.n_free_params - 3)

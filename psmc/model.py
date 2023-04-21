@@ -5,7 +5,8 @@ from scipy.optimize import minimize
 import json
 
 
-from tqdm.notebook import tqdm
+from tqdm.notebook import tqdm as tqdm_notebook
+from tqdm import tqdm as tqdm_terminal
 from IPython.display import clear_output
 
 
@@ -33,7 +34,7 @@ def rand_choice_nb(arr, prob):
     return arr[np.searchsorted(cum_prob, np.random.random(), side="right")]
 
 class PSMC:
-    def __init__(self, t_max=15, n_steps=64, theta0=0.1, rho0=0.05, mu=2.5 * 1e-8, pattern=None):
+    def __init__(self, t_max=15, n_steps=64, theta0=0.1, rho0=0.05, mu=2.5 * 1e-8, pattern=None, progress_bar='notebook'):
         
         self.n_steps = n_steps
         self.mu = mu
@@ -49,6 +50,11 @@ class PSMC:
 
         
         self.progress = {} # for tqdm
+        if progress_bar == 'notebook':
+            self.tqdm = tqdm_notebook
+        elif progress_bar == 'terminal':
+            self.tqdm = tqdm_terminal
+
         # store params of expectation step
         self.loglike_stored = None
         self.log_xi_stored = None
@@ -64,7 +70,7 @@ class PSMC:
             return 3 + self.n_steps
         else:
             return 3 + np.sum([int(x.split('*')[0]) for x in self.pattern.split('+')])
-        
+
     def save_params(self, filename):
         """
         Save model parameters to a json file.
@@ -313,7 +319,9 @@ class PSMC:
         
         alpha[:, 0, :], c_norm[:,0] = self.normalize(np.multiply(b[:,0,:], pi[None,:]), axis=-1)
         
-        self.progress['alpha'] = tqdm(total = S_max-1, desc="Calculating α", leave=True)
+
+        self.progress['alpha'] = self.tqdm(total = S_max-1, desc="Calculating α", leave=True)
+
         for s in range(1, S_max):
             alpha[:, s, :], c_norm[:,s] = self.normalize(np.multiply(b[:,s,:],
                                                                      np.dot(alpha[:, s-1, :], A)), axis=-1)
@@ -332,7 +340,9 @@ class PSMC:
         beta = np.zeros((batch_size, S_max, self.n_steps+1))
         beta[:, -1, :]= np.ones((batch_size, self.n_steps+1))   
 
-        self.progress['beta'] = tqdm(total = S_max-1, desc="Calculating β", leave=True)
+        
+        self.progress['beta'] = self.tqdm(total = S_max-1, desc="Calculating β", leave=True)
+        
         for s in range(S_max-2, -1, -1):
             beta[:, s, :] = np.dot(beta[:, s+1, :] * b[:,s+1,:], A.T) / c_norm[:,s+1,None]
             self.progress['beta'].update(1)
@@ -352,7 +362,9 @@ class PSMC:
         b = self.emission_likelihood(x)
         
         xi = np.zeros((self.n_steps+1, self.n_steps+1))
-        self.progress['xi'] = tqdm(total = S_max-1, desc="Calculating ξ, γ", leave=True)
+        
+        self.progress['xi'] = self.tqdm(total = S_max-1, desc="Calculating ξ, γ", leave=True)
+
         for i in range(1, S_max): # To reduce memmory usage
             xi += np.sum(alpha[:,i-1,:,None] * b[:,i,None,:] *
                          A[None,:,:] * beta[:,i,None,:] / cn[:,i,None,None], 0)
@@ -401,7 +413,7 @@ class PSMC:
         log_delta[:, 0, :] = emission_loglike[:,0,:] + log_state_priors[None,None,:]
         
         # Run the Viterbi algorithm
-        for s in tqdm(range(1, S_max)):
+        for s in self.tqdm(range(1, S_max)):
             max_val, argmax_val = maxmul(log_delta[:, s-1, :], log_transition_matrix)
             log_delta[:, s, :] = emission_loglike[:,s,:] + max_val
             psi[:, s, :] = argmax_val
@@ -432,7 +444,7 @@ class PSMC:
         
 
         log_delta = emission_loglike[:,0,z[0]] + log_state_priors[z[0]]
-        for s in tqdm(range(1, S_max)):
+        for s in self.tqdm(range(1, S_max)):
             log_delta += emission_loglike[:,s,z[s]] + log_transition_matrix[z[s-1],z[s]]
             
 
@@ -543,7 +555,7 @@ class PSMC:
             loglike_before_m = np.log(cn).sum()
             
             # Q-func maximization (M-step)
-            self.progress['Q'] = tqdm(total=5*100, desc='Q-func optimization', leave=True)
+            self.progress['Q'] = self.tqdm(total=5*100, desc='Q-func optimization', leave=True)
             optimized_params = minimize(self.Q_func,
                                             params0,
                                             args=(x,),
