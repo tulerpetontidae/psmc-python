@@ -3,7 +3,7 @@ import numpy as np
 from matplotlib.ticker import ScalarFormatter
 
 
-def plot_history(psmc, data, sim_history=None, th=20, n0_sim = 1e4):
+def plot_history(psmc, data=None, sim_history=None, th=20, n0_sim = 1e4, axs=None, color='dodgerblue', label='Estimated history'):
     """
     Plot the estimated population history using PSMC and optionally overlay the real history from a simulation.
 
@@ -23,11 +23,12 @@ def plot_history(psmc, data, sim_history=None, th=20, n0_sim = 1e4):
     xs[-1] = 1e10
     ys = psmc.map_lam(psmc.lam) * psmc.N0 / 100
     ys = np.append(ys, ys[-1])
-    es = psmc.sigma * (data.shape[0] * data.shape[1]) / psmc.C_sigma
+    if data is not None:
+        es = psmc.sigma * (data.shape[0] * data.shape[1]) / psmc.C_sigma
 
     
-
-    fig, axs = plt.subplots(1,1, figsize=(6,4), dpi=150)
+    if axs is None:
+        fig, axs = plt.subplots(1,1, figsize=(6,4), dpi=150)
     
     if sim_history is not None:
         sim_xs = sim_history[:,0]  * 4 * 25 * n0_sim
@@ -36,12 +37,13 @@ def plot_history(psmc, data, sim_history=None, th=20, n0_sim = 1e4):
         sim_ys = np.append(sim_ys, sim_ys[-1]) 
 
         axs.step(sim_xs, sim_ys, where='post', linestyle='--', color='k', label = "Real history", alpha=0.9)
+    if data is not None:
+        for i in range(len(xs)-1):
+            plt.axvspan(xs[i], xs[i+1], alpha=0.1, edgecolor='none', facecolor=('none' if es[i]>th else 'tomato'))
+    axs.step(xs, ys, where='post', linestyle='-', lw=2, color=color, label = label)
 
-    for i in range(len(xs)-1):
-        plt.axvspan(xs[i], xs[i+1], alpha=0.1, edgecolor='none', facecolor=('none' if es[i]>th else 'tomato'))
-    axs.step(xs, ys, where='post', linestyle='-', lw=2, color='dodgerblue', label = "Estimated history")
-
-    axs.axvspan(0, 0, alpha=0.1, edgecolor='none', facecolor='tomato', label = 'Potential overfitting')
+    if data is not None:
+        axs.axvspan(0, 0, alpha=0.1, edgecolor='none', facecolor='tomato', label = 'Potential overfitting')
     axs.set_xscale('log')
     axs.set_ylim(0, 5e4)
     axs.set_xlim(1e3, 1e7)
@@ -55,4 +57,4 @@ def plot_history(psmc, data, sim_history=None, th=20, n0_sim = 1e4):
 
     axs.spines['top'].set_visible(False)
     axs.spines['right'].set_visible(False)
-    axs.legend()
+    axs.legend() 
