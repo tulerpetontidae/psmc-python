@@ -16,6 +16,12 @@ cat French_chr1.vcf | vcfutils.pl vcf2fq -d 10 -D 100 | gzip > French_chr1.diplo
 path_to_original_psmc/utils/fq2psmcfa -q20 French_chr1-5.diploid.fq.gz > French_chr1.psmcfa
 ```
 
+Install the environemt using:
+
+```bash
+conda env create -f conda_env.yml
+```
+
 Then, run psmc-python using the following command:
 
 ```bash
