@@ -1,6 +1,7 @@
 from scipy.special import logsumexp
 import numpy as np
 import re
+import gzip
 from scipy.optimize import minimize
 from tqdm.notebook import tqdm
 
@@ -63,9 +64,18 @@ def read_sim_history(s):
     return np.array(tuples)
 
 def process_psmcfa(psmcfa, batch_size=300000):
-    
-    with open(psmcfa, 'r') as file:
-        psmcfasta = file.read().replace('\n', '')
+    # Convert a psmcfa file to a numpy array. PSMCFA files are fasta-like files of the form
+    # > chr1
+    # NNNKTTTKTNKTT
+    # where each letter represents a non-overlapping bin (of e.g. 100bp) indicating if there is at least
+    # one heterozygote in each bin (K), all are homozygous (T) or the bin should be treated as missing
+    # (e.g. >=90 filtered bases)
+    if psmcfa.endswith('.gz'):
+        with gzip.open(psmcfa, 'rt') as file:
+            psmcfasta = file.read().replace('\n', '')
+    else:
+        with open(psmcfa, 'r') as file:
+            psmcfasta = file.read().replace('\n', '')
     generated_seq = [re.sub(r'^\d+', '', x) for x in psmcfasta.split('>')[1:]]
     
     allowed_chars = set(['T', 'K', 'N'])
