@@ -29,10 +29,3 @@ python run.py French_chr1.psmcfa checkpoints/french_1.json 15 --t_max 15 --n_ste
 ```
 
 For interactive examples, refer to the **example.ipynb** notebook. The trained model parameters can be found in the **checkpoints/** folder, psmcfa files of genome data in the **genomes/** folder, and simulations in the **simulations/** folder.
-
-Dont forget to unzip using the following command:
-
-```bash
-gzip -d genomes/*.gz simulations/*.gz
-```
-
