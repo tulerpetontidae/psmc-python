@@ -48,7 +48,7 @@ def plot_history(psmc, data=None, sim_history=None, th=20, n0_sim = 1e4, axs=Non
     axs.set_ylim(0, 5e4)
     axs.set_xlim(1e3, 1e7)
     axs.set_title('Population History')
-    axs.set_xlabel('Years, $(g=25, \mu=2.5 × 10^{-8})$')
+    axs.set_xlabel(r'Years, $(g=25, \mu=2.5 × 10^{-8})$')
     axs.set_ylabel('Effective population size')
 
     axs.yaxis.set_major_formatter(ScalarFormatter(useMathText=True))
